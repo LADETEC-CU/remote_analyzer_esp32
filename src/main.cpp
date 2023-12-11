@@ -36,6 +36,13 @@ DynamicJsonDocument generatePhaseData()
   return json;
 }
 
+void setupPins()
+{
+  pinMode(PIN_LUZ, OUTPUT);
+  pinMode(PIN_COCINA, OUTPUT);
+  digitalWrite(PIN_LUZ, HIGH);
+  digitalWrite(PIN_COCINA, HIGH);
+}
 void initWiFi()
 {
   WiFi.mode(WIFI_STA);
@@ -55,6 +62,7 @@ void setup()
   {
     Serial.begin(115200);
   }
+  setupPins();
   // Connect to WiFi
   initWiFi();
 }
@@ -86,6 +94,20 @@ void loop()
       DynamicJsonDocument response(512);
       deserializeJson(response, http.getString());
       DEBUG_PRINTLN(response["digital_outputs"].as<String>());
+      // Iterate through the data and control the pins accordingly
+      for (JsonObject item : response["digital_outputs"].as<JsonArray>())
+      {
+        if (item["name"] == "Luz")
+        {
+          DEBUG_PRINTLN((bool)item["value"]);
+          digitalWrite(PIN_LUZ, !(bool)item["value"]);
+        }
+        else if (item["name"] == "Cocina")
+        {
+          DEBUG_PRINTLN((bool)item["value"]);
+          digitalWrite(PIN_COCINA, !(bool)item["value"]);
+        }
+      }
     }
     else
     {

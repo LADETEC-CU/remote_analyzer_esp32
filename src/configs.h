@@ -1,5 +1,8 @@
 extern int interval;
 
+#define PIN_LUZ 19
+#define PIN_COCINA 21
+
 #define DEBUG true
 #define DEBUG_PRINT(...)                \
     do                                  \
