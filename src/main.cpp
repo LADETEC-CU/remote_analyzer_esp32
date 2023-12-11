@@ -1,24 +1,40 @@
-#include <Arduino.h>
-#include <WiFi.h>
-#include <AsyncTCP.h>
-#include <ESPAsyncWebServer.h>
-#include <Wire.h>
-#include <SPI.h>
-#include <FS.h>
-#include "SPIFFS.h"
 #include "secrets.h"
-#include "AsyncJson.h"
 #include "ArduinoJson.h"
 #include "configs.h"
-#include "websocket_handler.h"
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+#include <random>
 
-unsigned int start = 0;
-int interval = 10;
-RTC_DS3231 rtc;
+// Define the URL for the API endpoint
+const char *url = "https://www.ladetec.com/demo/api/sensor";
 
-// Create AsyncWebServer object on port 80
-AsyncWebServer server(80);
-AsyncWebSocket ws("/ws"); // access at ws://[esp ip]/ws
+// Function to generate phase data
+DynamicJsonDocument generatePhaseData()
+{
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_real_distribution<float> voltageDist(108, 120);
+  std::uniform_real_distribution<float> currentDist(0, 25);
+  std::uniform_real_distribution<float> pfDist(0.6, 1);
+
+  float voltage = voltageDist(gen);
+  float current = currentDist(gen);
+  float pf = pfDist(gen);
+  float pa = voltage * current;
+  float power = pa * pf;
+  float pr = sqrt(pow(pa, 2) - pow(power, 2));
+
+  DynamicJsonDocument json(128);
+  json["voltage"] = voltage;
+  json["current"] = current;
+  json["power"] = power;
+  json["power_r"] = pr;
+  json["power_a"] = pa;
+  json["power_factor"] = pf;
+
+  return json;
+}
 
 void initWiFi()
 {
@@ -39,45 +55,46 @@ void setup()
   {
     Serial.begin(115200);
   }
-
-  // ------------------------- RTC ------------------------------------
-  if (!rtc.begin())
-  {
-    DEBUG_PRINTLN("Could not find RTC! Check circuit.");
-    while (1)
-      ;
-  }
-  DEBUG_PRINTLN("RTC CLOCK initiated correctly");
-
-  // ----------------------- SD card ---------------------------------
-  if (!SPIFFS.begin(false))
-  {
-    DEBUG_PRINTLN("SPIFFS Mount Failed");
-    return;
-  }
-  loadConfigFile();
-
-  // -------------------- Webserver -------------------------------
+  // Connect to WiFi
   initWiFi();
-
-  // WebSocket handler
-  ws.onEvent(onEvent);
-  server.addHandler(&ws);
-
-  server.serveStatic("/", SPIFFS, "/www/");
-  server.serveStatic("/logs/", SPIFFS, "/logs/");
-
-  server.begin();
-  start = millis();
 }
 
 void loop()
 {
-  // if (millis() - start > 2000)
-  // {
-  //   start = millis();
-  //   DateTime now = rtc.now();
-  //   strcpy(buffer, "DD MMM YYYY hh:mm:ss");
-  //   DEBUG_PRINTLN(String(now.toString(buffer)) + ", " + String(rtc.getTemperature()) + "ºC");
-  // }
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    // Create a data payload in JSON format
+    DynamicJsonDocument data(512);
+    data["phase1"] = generatePhaseData();
+    data["phase2"] = generatePhaseData();
+    data["phase3"] = generatePhaseData();
+
+    // Convert JSON to string
+    String jsonString;
+    serializeJson(data, jsonString);
+
+    // Send the data to the API endpoint using the POST method
+    HTTPClient http;
+    http.begin(url);
+    http.addHeader("Content-Type", "application/json");
+
+    int httpResponseCode = http.POST(jsonString);
+    if (httpResponseCode == 200)
+    {
+      // The data was successfully uploaded
+      DEBUG_PRINTLN("Data uploaded successfully");
+      DynamicJsonDocument response(512);
+      deserializeJson(response, http.getString());
+      DEBUG_PRINTLN(response["digital_outputs"].as<String>());
+    }
+    else
+    {
+      // An error occurred
+      Serial.printf("An error occurred: %d\n", httpResponseCode);
+    }
+
+    http.end();
+  }
+
+  delay(5000);
 }
